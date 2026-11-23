@@ -110,8 +110,13 @@ resolve_ref() {
 }
 
 init_stack() { # ref
-  local args=(-chdir="$DIR" init -upgrade -input=false -var-file="$SETTINGS" -var "module_ref=$1" ${PROFILE_ARGS[@]+"${PROFILE_ARGS[@]}"})
-  [ "${CI:-}" = true ] && args+=(-lockfile=readonly)
+  local args=(-chdir="$DIR" init -input=false -var-file="$SETTINGS" -var "module_ref=$1" ${PROFILE_ARGS[@]+"${PROFILE_ARGS[@]}"})
+  if [ "${CI:-}" = true ]; then
+    # OpenTofu rejects -upgrade together with a read-only lockfile.
+    args+=(-lockfile=readonly)
+  else
+    args+=(-upgrade)
+  fi
   tofu_ "${args[@]}" > "$CI_DIR/init.log" 2>&1 || { err "init failed for $STACK"; show_errors "$CI_DIR/init.log"; exit 1; }
 }
 

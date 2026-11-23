@@ -185,7 +185,8 @@ scripts/new-consumer.sh /tmp/dev --local   # consumer wired to this checkout (mo
 ```
 
 CI (`.github/workflows/ci.yml`) runs fmt, all three targets above, and
-actionlint on the library's and the template's GitHub workflows.
+actionlint on the library's and the template's GitHub workflows. The CI fixture
+runs with `CI=true` to exercise read-only provider lockfile initialization.
 
 ## Releasing
 

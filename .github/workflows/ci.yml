@@ -25,6 +25,8 @@ jobs:
       - run: tofu fmt -recursive -check -diff
       - run: make test
       - run: make test-ci
+        env:
+          CI: "true"
       - run: make validate-template
       - name: actionlint
         run: |

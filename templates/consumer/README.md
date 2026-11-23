@@ -98,7 +98,9 @@ library script behind `make` targets, driven by environment variables:
 Environment: `TF_VAR_state_passphrase`, `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`
 (state), and either your `~/.oci/config` profile or `OCI_TENANCY_OCID`,
 `OCI_REGION` plus `OCI_PLAN_*` (plan/drift) or `OCI_APPLY_*` (apply). Output is
-redacted: addresses and counts only, never values.
+redacted: addresses and counts only, never values. With `CI=true`, OpenTofu
+uses the committed provider lockfiles without upgrading providers. If a lockfile
+needs updating, run `make lock` locally and commit the result.
 
 What each system needs to add:
 1. carry `.ci/` from the plan job to the apply job (artifacts), **or**

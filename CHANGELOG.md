@@ -6,6 +6,12 @@ tracking channel), so every entry has **Manual steps**, even if that's "None".
 
 ## [Unreleased]
 
+### Fixed
+- CI initializes with a read-only provider lockfile without passing the incompatible `-upgrade` flag. Local runs keep `-upgrade`.
+
+### Manual steps
+- None.
+
 ## [0.1.0]
 
 First release as a library (modules + reusable workflows + consumer template).
