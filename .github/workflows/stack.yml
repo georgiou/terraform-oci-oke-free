@@ -105,7 +105,7 @@ jobs:
           tofu_wrapper: false
       - name: Settings from secret (only if not committed)
         run: '[ -f config/settings.tfvars ] || [ -z "$TOFU_SETTINGS" ] || printf "%s\n" "$TOFU_SETTINGS" > config/settings.tfvars'
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: tfplan-${{ inputs.stack }}
           path: .ci
