@@ -1,0 +1,33 @@
+# IPv4 + IPv6 ingress via the Always Free *flexible* Load Balancer (10 Mbps).
+# Requires enable_ipv6 = true in stacks/10-network.
+#
+# Why not the NLB? OCI NLB listeners and backend sets are single-stack, so an
+# IPv6 listener needs IPv6 backends, and the nodes here are IPv4-only. The L7
+# flexible LB proxies, so IPv6 clients reach IPv4 NodePorts fine.
+#
+# Verify once after applying: `kubectl get svc gateway -o wide` should list
+# both an IPv4 and an IPv6 EXTERNAL-IP. OCI documents dual-stack LBs on IPv4
+# single-stack clusters; if yours comes up IPv4-only, the API server dropped
+# the IPv6 family, so fall back to a second SingleStack Service.
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway
+  namespace: gateway-system
+  annotations:
+    oci.oraclecloud.com/load-balancer-type: "lb"
+    service.beta.kubernetes.io/oci-load-balancer-shape: "flexible"
+    service.beta.kubernetes.io/oci-load-balancer-shape-flex-min: "10"
+    service.beta.kubernetes.io/oci-load-balancer-shape-flex-max: "10" # >10 Mbps is billed
+    oci.oraclecloud.com/security-rule-management-mode: "None"
+    oci.oraclecloud.com/oci-network-security-groups: "<LB_NSG_OCID>"
+spec:
+  type: LoadBalancer
+  ipFamilyPolicy: PreferDualStack
+  ipFamilies: [IPv4, IPv6]
+  externalTrafficPolicy: Cluster
+  selector:
+    app.kubernetes.io/name: gateway
+  ports:
+    - { name: http, port: 80, targetPort: 8080 }
+    - { name: https, port: 443, targetPort: 8443 }

@@ -1,0 +1,60 @@
+# Forgejo / Gitea Actions. Copy to .forgejo/workflows/tofu.yml (or .gitea/workflows/).
+# Same model as the GitHub workflows, but calling `make` directly (cross-repo
+# reusable workflows aren't portable across Forgejo/Gitea versions).
+#
+# Repository secrets: TF_VAR_STATE_PASSPHRASE, STATE_S3_ACCESS_KEY_ID, STATE_S3_SECRET_ACCESS_KEY,
+#   OCI_PLAN_USER_OCID, OCI_PLAN_FINGERPRINT, OCI_PLAN_KEY_PEM,
+#   OCI_APPLY_USER_OCID, OCI_APPLY_FINGERPRINT, OCI_APPLY_KEY_PEM
+# Repository variables: OCI_TENANCY_OCID, OCI_REGION
+# Apply: copy the "changes sha256" from a reviewed plan run's log, then run this
+# workflow manually with approve = <that hash>. It re-plans and applies only if
+# the change list is identical to what you reviewed.
+name: tofu
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "23 4 * * *"
+  workflow_dispatch:
+    inputs:
+      approve:
+        description: "changes sha256 of the plan you reviewed (empty = plan only)"
+        type: string
+        default: ""
+
+env:
+  TF_IN_AUTOMATION: "1"
+  TF_VAR_state_passphrase: ${{ secrets.TF_VAR_STATE_PASSPHRASE }}
+  AWS_ACCESS_KEY_ID: ${{ secrets.STATE_S3_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.STATE_S3_SECRET_ACCESS_KEY }}
+  OCI_TENANCY_OCID: ${{ vars.OCI_TENANCY_OCID }}
+  OCI_REGION: ${{ vars.OCI_REGION }}
+
+jobs:
+  tofu:
+    runs-on: docker
+    container: debian:stable-slim
+    steps:
+      - run: apt-get update -qq && apt-get install -y -qq git nodejs ca-certificates >/dev/null
+      - uses: actions/checkout@v4
+      - run: sh ci-examples/install-tools.sh
+      - run: make ci-check
+      - name: Plan (or drift on schedule)
+        env:
+          OCI_PLAN_USER_OCID: ${{ secrets.OCI_PLAN_USER_OCID }}
+          OCI_PLAN_FINGERPRINT: ${{ secrets.OCI_PLAN_FINGERPRINT }}
+          OCI_PLAN_KEY_PEM: ${{ secrets.OCI_PLAN_KEY_PEM }}
+        run: |
+          if [ "${{ github.event_name }}" = schedule ]; then make ci-drift; else make ci-plan; fi
+      # Same job: applies this run's saved plan, but only if its change list
+      # hashes to the value you approved.
+      - name: Apply (manual dispatch on main with approval)
+        if: github.event_name == 'workflow_dispatch' && inputs.approve != '' && github.ref == 'refs/heads/main'
+        env:
+          EXPECT_CHANGES_SHA256: ${{ inputs.approve }}
+          OCI_APPLY_USER_OCID: ${{ secrets.OCI_APPLY_USER_OCID }}
+          OCI_APPLY_FINGERPRINT: ${{ secrets.OCI_APPLY_FINGERPRINT }}
+          OCI_APPLY_KEY_PEM: ${{ secrets.OCI_APPLY_KEY_PEM }}
+        run: make ci-apply

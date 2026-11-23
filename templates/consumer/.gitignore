@@ -1,0 +1,11 @@
+.terraform/
+*.tfstate
+*.tfstate.*
+tfplan
+*.tfplan
+crash.log
+kubeconfig*
+.ci/
+*.pem
+*.auto.tfvars
+.lib/

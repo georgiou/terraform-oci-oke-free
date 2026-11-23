@@ -1,0 +1,32 @@
+# Manual apply of a plan from a `tofu` run on main. Starting this IS the approval.
+#   gh workflow run apply.yml -f run_id=<tofu run id>
+name: apply
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "ID of the tofu run that produced the plan"
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: tofu-state
+  cancel-in-progress: false
+
+jobs:
+  cluster:
+    uses: UPSTREAM_OWNER/UPSTREAM_REPO/.github/workflows/apply-plan.yml@UPSTREAM_REF
+    with:
+      run_id: ${{ inputs.run_id }}
+      stack: cluster
+      tenancy_ocid: ${{ vars.OCI_TENANCY_OCID }}
+      region: ${{ vars.OCI_REGION }}
+    secrets:
+      STATE_PASSPHRASE: ${{ secrets.STATE_PASSPHRASE }}
+      STATE_S3_ACCESS_KEY_ID: ${{ secrets.STATE_S3_ACCESS_KEY_ID }}
+      STATE_S3_SECRET_ACCESS_KEY: ${{ secrets.STATE_S3_SECRET_ACCESS_KEY }}
+      TOFU_SETTINGS: ${{ secrets.TOFU_SETTINGS }}

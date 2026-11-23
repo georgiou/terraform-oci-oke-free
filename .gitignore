@@ -1,0 +1,9 @@
+.terraform/
+*.tfstate
+*.tfstate.*
+tfplan
+crash.log
+.ci/
+*.pem
+# Lock files belong to consumers' roots, not to library modules.
+modules/**/.terraform.lock.hcl

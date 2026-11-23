@@ -1,0 +1,32 @@
+# The library's own CI: module tests, template validation against the local
+# modules, and workflow linting. Consumers never run this.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - id: ver
+        run: echo "version=$(cat .opentofu-version)" >> "$GITHUB_OUTPUT"
+      - uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: ${{ steps.ver.outputs.version }}
+          tofu_wrapper: false
+      - run: tofu fmt -recursive -check -diff
+      - run: make test
+      - run: make test-ci
+      - run: make validate-template
+      - name: actionlint
+        run: |
+          bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+          ./actionlint -color .github/workflows/*.yml templates/consumer/.github/workflows/*.yml

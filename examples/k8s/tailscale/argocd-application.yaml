@@ -1,0 +1,33 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: tailscale-operator
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://pkgs.tailscale.com/helmcharts
+    chart: tailscale-operator
+    # Pin an exact version: helm repo add tailscale https://pkgs.tailscale.com/helmcharts
+    #                       helm search repo tailscale/tailscale-operator
+    targetRevision: "<pin-exact-version>"
+    helm:
+      valuesObject:
+        operatorConfig:
+          hostname: oke-free-operator
+          defaultTags: ["tag:k8s-operator"]
+          resources:
+            requests: { cpu: 25m, memory: 64Mi }
+            limits: { memory: 256Mi }
+        proxyConfig:
+          defaultTags: "tag:k8s"
+        # "true" = auth mode: requests are impersonated as the tailnet caller,
+        # so normal Kubernetes RBAC applies (see rbac.yaml).
+        apiServerProxyConfig:
+          mode: "true"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: tailscale
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions: ["CreateNamespace=true", "ServerSideApply=true"]

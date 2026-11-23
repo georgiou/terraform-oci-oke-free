@@ -1,0 +1,24 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "enabledManagers": ["github-actions", "custom.regex"],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Library release in config/settings.tfvars (module_ref)",
+      "managerFilePatterns": ["/^config/settings\\.tfvars$/"],
+      "matchStrings": [
+        "module_ref\\s*=\\s*\"(?<currentValue>[^\"]+)\"\\s*#\\s*renovate:\\s*datasource=(?<datasource>\\S+)\\s+depName=(?<depName>\\S+)"
+      ],
+      "versioningTemplate": "semver"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "One PR per library release: module_ref and the reusable workflow refs move together.",
+      "matchPackageNames": ["UPSTREAM_OWNER/UPSTREAM_REPO"],
+      "groupName": "oci-oke-free library",
+      "automerge": false
+    }
+  ]
+}

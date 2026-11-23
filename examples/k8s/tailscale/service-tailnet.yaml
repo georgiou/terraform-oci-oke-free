@@ -1,0 +1,17 @@
+# Reachable at http://grafana.<tailnet>.ts.net from your tailnet only.
+# loadBalancerClass makes OCI's cloud controller ignore this Service, so no
+# (possibly billed) OCI load balancer is created.
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana-tailnet
+  namespace: monitoring
+  annotations:
+    tailscale.com/hostname: grafana
+spec:
+  type: LoadBalancer
+  loadBalancerClass: tailscale
+  selector:
+    app.kubernetes.io/name: grafana
+  ports:
+    - { name: http, port: 80, targetPort: 3000 }

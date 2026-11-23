@@ -1,0 +1,24 @@
+# Expose your ingress/gateway controller through the Always Free
+# Network Load Balancer. Replace <LB_NSG_OCID> with:
+#   tofu -chdir=stacks/20-oke output -raw lb_nsg_id
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway
+  namespace: gateway-system
+  annotations:
+    oci.oraclecloud.com/load-balancer-type: "nlb"
+    # Don't let the cloud controller edit security lists; the NSG covers it.
+    oci-network-load-balancer.oraclecloud.com/security-list-management-mode: "None"
+    oci.oraclecloud.com/oci-network-security-groups: "<LB_NSG_OCID>"
+    # Worker NSG only admits NodePort traffic from the LB NSG, so keep the
+    # NLB proxying (not preserving client source IPs).
+    oci-network-load-balancer.oraclecloud.com/is-preserve-source: "false"
+spec:
+  type: LoadBalancer
+  externalTrafficPolicy: Cluster
+  selector:
+    app.kubernetes.io/name: gateway
+  ports:
+    - { name: http, port: 80, targetPort: 8080 }
+    - { name: https, port: 443, targetPort: 8443 }

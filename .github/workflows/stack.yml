@@ -1,0 +1,161 @@
+# Reusable workflow, called from consumer repos:
+#   uses: OWNER/oci-oke-free/.github/workflows/stack.yml@<ref>
+#
+# A thin GitHub wrapper around `make ci-*` (the library's scripts/consumer/ci.sh),
+# the same driver every other CI uses. GitHub-specific parts only: artifacts
+# between jobs, the production environment gate, job summaries, drift issues.
+#
+# modes: plan   = pull requests (read-only identity, nothing uploaded)
+#        deploy = main: plan, upload the encrypted plan, auto-apply if allowed
+#        drift  = nightly: plan, open/close a "drift" issue (no details)
+name: stack
+
+on:
+  workflow_call:
+    inputs:
+      stack: { type: string, default: cluster, description: "Root under stacks/ to run" }
+      mode: { type: string, default: plan, description: "plan | deploy | drift" }
+      tenancy_ocid: { type: string, required: true, description: "vars.OCI_TENANCY_OCID" }
+      region: { type: string, required: true, description: "vars.OCI_REGION" }
+      auto_apply: { type: string, default: "off", description: "off | safe" }
+    secrets:
+      STATE_PASSPHRASE: { required: true }
+      STATE_S3_ACCESS_KEY_ID: { required: true }
+      STATE_S3_SECRET_ACCESS_KEY: { required: true }
+      OCI_PLAN_USER_OCID: { required: true }
+      OCI_PLAN_FINGERPRINT: { required: true }
+      OCI_PLAN_KEY_PEM: { required: true }
+      TOFU_SETTINGS: { required: false, description: "Only if config/settings.tfvars is gitignored" }
+      # The apply identity lives in the caller's "production" environment;
+      # GitHub injects environment secrets into the job that declares it.
+      OCI_APPLY_USER_OCID: { required: false }
+      OCI_APPLY_FINGERPRINT: { required: false }
+      OCI_APPLY_KEY_PEM: { required: false }
+    outputs:
+      changes: { value: "${{ jobs.plan.outputs.changes }}" }
+      safe: { value: "${{ jobs.plan.outputs.safe }}" }
+      applied: { value: "${{ jobs.apply.outputs.applied }}" }
+
+permissions:
+  contents: read
+
+env:
+  TF_IN_AUTOMATION: "1"
+  STACK: ${{ inputs.stack }}
+  OCI_TENANCY_OCID: ${{ inputs.tenancy_ocid }}
+  OCI_REGION: ${{ inputs.region }}
+  TF_VAR_state_passphrase: ${{ secrets.STATE_PASSPHRASE }}
+  AWS_ACCESS_KEY_ID: ${{ secrets.STATE_S3_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.STATE_S3_SECRET_ACCESS_KEY }}
+  TOFU_SETTINGS: ${{ secrets.TOFU_SETTINGS }}
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      changes: ${{ steps.plan.outputs.changes }}
+      safe: ${{ steps.plan.outputs.safe }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: ver
+        run: echo "version=$(cat .opentofu-version)" >> "$GITHUB_OUTPUT"
+      - uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: ${{ steps.ver.outputs.version }}
+          tofu_wrapper: false
+      - name: Settings from secret (only if not committed)
+        run: '[ -f config/settings.tfvars ] || [ -z "$TOFU_SETTINGS" ] || printf "%s\n" "$TOFU_SETTINGS" > config/settings.tfvars'
+      - run: make ci-check
+      - id: plan
+        name: Plan (redacted)
+        env:
+          OCI_PLAN_USER_OCID: ${{ secrets.OCI_PLAN_USER_OCID }}
+          OCI_PLAN_FINGERPRINT: ${{ secrets.OCI_PLAN_FINGERPRINT }}
+          OCI_PLAN_KEY_PEM: ${{ secrets.OCI_PLAN_KEY_PEM }}
+        run: |
+          make ci-plan
+          cat .ci/summary.md >> "$GITHUB_STEP_SUMMARY"
+          grep -E '^(CHANGES|SAFE)=' .ci/result.env | tr '[:upper:]' '[:lower:]' >> "$GITHUB_OUTPUT"
+      - if: inputs.mode == 'deploy' && steps.plan.outputs.changes == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-${{ inputs.stack }}
+          path: |
+            .ci/tfplan
+            .ci/module_ref
+            .ci/result.env
+          include-hidden-files: true
+          retention-days: 7
+          if-no-files-found: error
+
+  apply:
+    needs: plan
+    if: inputs.mode == 'deploy' && needs.plan.outputs.changes == 'true' && needs.plan.outputs.safe == 'true' && inputs.auto_apply == 'safe'
+    runs-on: ubuntu-latest
+    environment: production
+    outputs:
+      applied: ${{ steps.apply.outputs.applied }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: ver
+        run: echo "version=$(cat .opentofu-version)" >> "$GITHUB_OUTPUT"
+      - uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: ${{ steps.ver.outputs.version }}
+          tofu_wrapper: false
+      - name: Settings from secret (only if not committed)
+        run: '[ -f config/settings.tfvars ] || [ -z "$TOFU_SETTINGS" ] || printf "%s\n" "$TOFU_SETTINGS" > config/settings.tfvars'
+      - uses: actions/download-artifact@v4
+        with:
+          name: tfplan-${{ inputs.stack }}
+          path: .ci
+      - id: apply
+        name: Apply the saved plan (redacted)
+        env:
+          OCI_APPLY_USER_OCID: ${{ secrets.OCI_APPLY_USER_OCID }}
+          OCI_APPLY_FINGERPRINT: ${{ secrets.OCI_APPLY_FINGERPRINT }}
+          OCI_APPLY_KEY_PEM: ${{ secrets.OCI_APPLY_KEY_PEM }}
+        run: |
+          make ci-apply-if-safe
+          if grep -q '^APPLIED=true' .ci/result.env; then
+            echo "applied=true" >> "$GITHUB_OUTPUT"
+            echo "### $STACK: applied automatically (safe plan)" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  report:
+    needs: [plan, apply]
+    if: ${{ !cancelled() && needs.plan.result != 'skipped' }}
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Next steps / drift issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          MODE: ${{ inputs.mode }}
+          CHANGES: ${{ needs.plan.outputs.changes }}
+          APPLIED: ${{ needs.apply.outputs.applied }}
+          PLAN_RESULT: ${{ needs.plan.result }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ "$MODE" = deploy ] && [ "$CHANGES" = true ] && [ "$APPLIED" != true ]; then
+            {
+              echo "### Waiting for you: $STACK has a plan to apply"
+              echo "Review: \`make review-plan RUN=$RUN_ID\`"
+              echo "Apply:  Actions -> apply -> Run workflow with run_id \`$RUN_ID\`, or \`gh workflow run apply.yml -f run_id=$RUN_ID\`"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          [ "$MODE" = drift ] || exit 0
+          open=$(gh issue list --label drift --state open --json number -q '.[0].number')
+          if [ "$PLAN_RESULT" = success ] && [ "$CHANGES" != true ]; then
+            [ -z "$open" ] || gh issue close "$open" -c "No drift as of $RUN_URL"
+            exit 0
+          fi
+          what=$([ "$PLAN_RESULT" = success ] && echo "differs from main (drift, or a library update on a tracking channel)" || echo "could not be planned")
+          # Deliberately no plan details: issues on public repos are public.
+          body="Live infrastructure for \`$STACK\` $what. Run: $RUN_URL. Re-run the tofu workflow (dispatch) for an appliable plan, or check locally with \`make plan-$STACK\`."
+          gh label create drift --color B60205 --description "Infrastructure drift" --force >/dev/null
+          if [ -n "$open" ]; then gh issue comment "$open" -b "$body"
+          else gh issue create --title "Infrastructure drift: $STACK" --label drift --body "$body"; fi

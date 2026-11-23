@@ -1,0 +1,65 @@
+# GitLab CI. Copy to .gitlab-ci.yml.
+#
+# CI/CD variables (Settings -> CI/CD -> Variables). Masked; mark the apply ones
+# and the state ones "Protected" so only protected branches (main) see them:
+#   TF_VAR_state_passphrase, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
+#   OCI_TENANCY_OCID, OCI_REGION
+#   OCI_PLAN_USER_OCID, OCI_PLAN_FINGERPRINT, OCI_PLAN_KEY_PEM       (read-only identity)
+#   OCI_APPLY_USER_OCID, OCI_APPLY_FINGERPRINT, OCI_APPLY_KEY_PEM    (Protected!)
+#   AUTO_APPLY = safe   (optional)
+# Drift: add a pipeline schedule (CI/CD -> Schedules), e.g. nightly on main.
+# Updates: run Renovate for GitLab (it reads renovate.json as is).
+
+default:
+  image: debian:stable-slim
+  before_script:
+    - sh ci-examples/install-tools.sh
+
+variables:
+  TF_IN_AUTOMATION: "1"
+
+stages: [check, plan, apply]
+
+check:
+  stage: check
+  script: [make ci-check]
+  rules:
+    - if: $CI_PIPELINE_SOURCE != "schedule"
+
+plan:
+  stage: plan
+  script: [make ci-plan]
+  artifacts:
+    # tfplan is OpenTofu-encrypted; summary.md has addresses only.
+    paths: [.ci/tfplan, .ci/module_ref, .ci/result.env, .ci/summary.md]
+    expire_in: 7 days
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE != "schedule"
+
+# Applies automatically only if AUTO_APPLY=safe and the plan is classified safe.
+apply-safe:
+  stage: apply
+  needs: [plan]
+  script: [make ci-apply-if-safe]
+  environment: production
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE != "schedule" && $AUTO_APPLY == "safe"
+
+# The approval: press play. Applies exactly the plan artifact from this pipeline.
+apply:
+  stage: apply
+  needs: [plan]
+  script: [make ci-apply]
+  environment: production
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE != "schedule"
+      when: manual
+      allow_failure: true
+
+# A failed scheduled pipeline (exit 2) is the drift alert; GitLab emails you.
+drift:
+  stage: plan
+  script: [make ci-drift]
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"

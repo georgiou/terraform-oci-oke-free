@@ -1,0 +1,48 @@
+# Your cluster's configuration. `make configure` copies this to
+# config/settings.tfvars and fills in the identity section. Commit that file:
+# it holds no secrets, and changes to it go through PR plans like code.
+# (Public repo and want it private? Gitignore it; `make github-setup` then
+# stores it as the TOFU_SETTINGS secret instead.)
+
+# -------------------------------------------------------------- library
+modules_source = "git::https://github.com/UPSTREAM_OWNER/UPSTREAM_REPO.git//modules"
+# Release channel (Renovate opens a PR when a new release appears), or
+# "main" to track the latest commit (CI pins each run to a commit SHA).
+module_ref = "UPSTREAM_REF" # renovate: datasource=github-tags depName=UPSTREAM_OWNER/UPSTREAM_REPO
+
+# ------------------------------------------------------------- identity
+tenancy_ocid    = "ocid1.tenancy.oc1..aaaa..."
+region          = "uk-london-1" # MUST be your home region (Always Free)
+oci_profile     = "DEFAULT"
+project         = "oke-free"
+state_namespace = "abcd1234efgh" # oci os ns get
+state_bucket    = "tofu-state"
+
+# ------------------------------------------------------------ bootstrap
+# Keys and defaults: modules/bootstrap/settings.tf in the library.
+bootstrap = {
+  budget_alert_emails = ["you@example.com"]
+}
+
+# -------------------------------------------------------------- cluster
+# Keys and defaults: modules/cluster/settings.tf in the library. Anything
+# you don't set follows the library's defaults (and their updates).
+cluster = {
+  # Pick ONE way to reach the Kubernetes API:
+  #   Tailscale (recommended): enable_tailscale = true (keep your IP in
+  #   api_allowed_cidrs until the operator works: library examples/k8s/tailscale)
+  #   or an allowlist:         api_allowed_cidrs = ["<your-ip>/32"]
+  enable_tailscale = true
+
+  # Free-only tenancy: false. After a Pay As You Go upgrade you may set true.
+  # private_workers = false
+
+  # Public load balancers (off = private-only).
+  # enable_public_ingress = false
+
+  # Pin to hold Kubernetes upgrades; unset follows library releases.
+  # kubernetes_version = "v1.36.4"
+}
+
+# Grandfathered tenancy with a bigger allowance? (tenancy-wide)
+# free_tier_limits = { a1_ocpus = 4, a1_memory_gbs = 24, block_storage_gbs = 200 }
