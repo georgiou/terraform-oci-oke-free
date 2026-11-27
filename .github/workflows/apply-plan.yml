@@ -62,7 +62,7 @@ jobs:
           ref: ${{ steps.run.outputs.sha }}
       - id: ver
         run: echo "version=$(cat .opentofu-version)" >> "$GITHUB_OUTPUT"
-      - uses: opentofu/setup-opentofu@v1
+      - uses: opentofu/setup-opentofu@v2
         with:
           tofu_version: ${{ steps.ver.outputs.version }}
           tofu_wrapper: false
