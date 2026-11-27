@@ -57,7 +57,7 @@ jobs:
           [ "$(jq -r .headBranch <<<"$info")" = main ] || { echo "::error::only plans made on main can be applied"; exit 1; }
           case "$(jq -r .event <<<"$info")" in push|workflow_dispatch) ;; *) echo "::error::run $RUN_ID is not a deploy run"; exit 1;; esac
           echo "sha=$(jq -r .headSha <<<"$info")" >> "$GITHUB_OUTPUT"
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ steps.run.outputs.sha }}
       - id: ver
