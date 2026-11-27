@@ -90,7 +90,7 @@ jobs:
           cat .ci/summary.md >> "$GITHUB_STEP_SUMMARY"
           grep -E '^(CHANGES|SAFE)=' .ci/result.env | tr '[:upper:]' '[:lower:]' >> "$GITHUB_OUTPUT"
       - if: inputs.mode == 'deploy' && steps.plan.outputs.changes == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: tfplan-${{ inputs.stack }}
           path: |
