@@ -61,7 +61,7 @@ jobs:
       changes: ${{ steps.plan.outputs.changes }}
       safe: ${{ steps.plan.outputs.safe }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - id: ver
         run: echo "version=$(cat .opentofu-version)" >> "$GITHUB_OUTPUT"
       - uses: opentofu/setup-opentofu@v1
@@ -114,7 +114,7 @@ jobs:
     outputs:
       applied: ${{ steps.apply.outputs.applied }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - id: ver
         run: echo "version=$(cat .opentofu-version)" >> "$GITHUB_OUTPUT"
       - uses: opentofu/setup-opentofu@v1
