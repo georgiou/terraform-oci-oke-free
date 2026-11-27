@@ -18,9 +18,11 @@ fmt:
 test:
 	@for m in $(TESTED); do echo "== $$m"; $(TOFU) -chdir=$$m init -backend=false -input=false >/dev/null && $(TOFU) -chdir=$$m test || exit 1; done
 
-# ci.sh end to end against a provider-free fixture (no credentials).
+# Provider-free CI fixture and local bootstrap workflow mocks (no credentials).
 test-ci:
 	@tests/ci/run.sh
+	@python3 tests/ci/onboarding.py
+	@bash tests/ci/library-ref.sh
 
 # Scaffold a consumer against the local modules and validate both roots with
 # the template's example settings, so the template can't rot.

@@ -86,10 +86,11 @@ sed -i.bak 's/items          = \["a", "c"\]/items          = ["a", "c", "d"]/' c
 approved=$(sed -n 's/^CHANGES_SHA256=//p' .ci/result.env)
 "$CI_SH" plan >/dev/null 2>&1   # re-plan, as a Forgejo/Woodpecker apply run would
 [ "$(sed -n 's/^CHANGES_SHA256=//p' .ci/result.env)" = "$approved" ] || die "change-list hash must be deterministic across re-plans"
-set +e; EXPECT_CHANGES_SHA256=0000 "$CI_SH" apply >/dev/null 2>&1; rc=$?; set -e
-[ "$rc" -ne 0 ] || die "apply must refuse a change list that doesn't match the approval"
-EXPECT_CHANGES_SHA256="$approved" "$CI_SH" apply >/dev/null 2>&1 || die "apply with the matching approval failed"
-pass "re-planned apply: deterministic change hash, mismatches refused, match applied"
+if EXPECT_CHANGES_SHA256="$approved" "$CI_SH" apply >/dev/null 2>&1; then
+  die "even a matching change-list hash must not authorize a re-plan"
+fi
+"$CI_SH" apply >/dev/null 2>&1 || die "apply of the saved artifact failed"
+pass "checksum of addresses and actions cannot approve a re-plan"
 
 rm -f .ci/tfplan
 set +e; "$CI_SH" apply >/dev/null 2>&1; rc=$?; set -e
@@ -99,4 +100,45 @@ pass "apply without a saved plan fails"
 set +e; TF_VAR_state_passphrase=short "$CI_SH" plan >/dev/null 2>&1; rc=$?; set -e
 [ "$rc" -ne 0 ] || die "short passphrase must fail"
 pass "rejects a short state passphrase"
+
+# Verify failure observability without leaking diagnostic values or artifacts.
+mkdir "$W/bin"
+REAL_TOFU="$(command -v tofu)"
+export REAL_TOFU
+cat > "$W/bin/tofu" <<'T'
+#!/usr/bin/env bash
+if [ "${2:-}" = "${FAIL_STAGE:-}" ]; then
+  printf 'Error: SECRET-CANARY in a raw diagnostic\n' >&2
+  exit 1
+fi
+if [ "${2:-}" = show ] && [ -n "${MOCK_CLUSTER_CHANGE:-}" ]; then
+  printf '{"resource_changes":[{"type":"oci_containerengine_cluster","address":"oci_containerengine_cluster.fixture","change":{"actions":%s}}]}\n' "$MOCK_CLUSTER_CHANGE"
+  exit 0
+fi
+exec "$REAL_TOFU" "$@"
+T
+chmod +x "$W/bin/tofu"
+for stage in init plan show; do
+  touch .ci/tfplan
+  if out=$(FAIL_STAGE="$stage" PATH="$W/bin:$PATH" "$CI_SH" plan 2>&1); then die "$stage should fail"; fi
+  ! grep -q SECRET-CANARY <<<"$out" || die "$stage leaked a raw diagnostic"
+  [ ! -e .ci/tfplan ] && [ -z "$(find .ci -name '.work.*' -print)" ] || die "$stage left a stale artifact or private workspace"
+done
+sed -i.bak 's/"d"/"e"/' config/settings.tfvars
+"$CI_SH" plan >/dev/null
+if out=$(FAIL_STAGE=apply PATH="$W/bin:$PATH" "$CI_SH" apply 2>&1); then die "apply should fail"; fi
+! grep -q SECRET-CANARY <<<"$out" || die "apply leaked a raw diagnostic"
+[ -z "$(find .ci -name '.work.*' -print)" ] || die "apply left a private workspace"
+if out=$(STACK=bootstrap "$CI_SH" plan 2>&1); then die "CI accepted bootstrap"; fi
+grep -q 'bootstrap is local-only' <<<"$out" || die "bootstrap rejection not reported"
+pass "failure paths are redacted and cleaned; bootstrap is local-only"
+
+for change in '["create"]' '["delete","create"]'; do
+  if out=$(MOCK_CLUSTER_CHANGE="$change" PATH="$W/bin:$PATH" "$CI_SH" plan 2>&1); then die "CI published a cluster creation or replacement"; fi
+  grep -q 'must be planned locally' <<<"$out" || die "missing first-cluster guard"
+  [ ! -e .ci/tfplan ] || die "guard left an appliable plan"
+  set +e; out=$(MOCK_CLUSTER_CHANGE="$change" PATH="$W/bin:$PATH" "$CI_SH" drift 2>&1); rc=$?; set -e
+  [ "$rc" -eq 2 ] && grep -qx 'CHANGES=true' .ci/result.env && [ ! -e .ci/tfplan ] || die "cluster creation or replacement must report drift without publishing a plan"
+done
+pass "cluster creation and replacement count as drift but are not appliable from CI"
 echo "all ci.sh tests passed"

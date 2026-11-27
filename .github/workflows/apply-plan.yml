@@ -13,9 +13,9 @@ on:
       tenancy_ocid: { type: string, required: true, description: "vars.OCI_TENANCY_OCID" }
       region: { type: string, required: true, description: "vars.OCI_REGION" }
     secrets:
-      STATE_PASSPHRASE: { required: true }
-      STATE_S3_ACCESS_KEY_ID: { required: true }
-      STATE_S3_SECRET_ACCESS_KEY: { required: true }
+      STATE_PASSPHRASE: { required: false }
+      STATE_S3_ACCESS_KEY_ID: { required: false }
+      STATE_S3_SECRET_ACCESS_KEY: { required: false }
       TOFU_SETTINGS: { required: false }
       OCI_APPLY_USER_OCID: { required: false }
       OCI_APPLY_FINGERPRINT: { required: false }
@@ -27,6 +27,7 @@ permissions:
 
 jobs:
   apply:
+    if: github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     environment: production
     env:
@@ -49,7 +50,10 @@ jobs:
           GH_REPO: ${{ github.repository }}
           RUN_ID: ${{ inputs.run_id }}
         run: |
-          info=$(gh run view "$RUN_ID" --json headSha,headBranch,event)
+          [[ "$RUN_ID" =~ ^[0-9]+$ ]] || { echo '::error::run_id must be numeric'; exit 1; }
+          info=$(gh run view "$RUN_ID" --json headSha,headBranch,event,workflowDatabaseId)
+          workflow_id=$(jq -er .workflowDatabaseId <<<"$info")
+          [ "$(gh api "repos/$GH_REPO/actions/workflows/$workflow_id" --jq .path)" = '.github/workflows/tofu.yml' ] || { echo '::error::not a tofu workflow run'; exit 1; }
           [ "$(jq -r .headBranch <<<"$info")" = main ] || { echo "::error::only plans made on main can be applied"; exit 1; }
           case "$(jq -r .event <<<"$info")" in push|workflow_dispatch) ;; *) echo "::error::run $RUN_ID is not a deploy run"; exit 1;; esac
           echo "sha=$(jq -r .headSha <<<"$info")" >> "$GITHUB_OUTPUT"
@@ -71,6 +75,10 @@ jobs:
           run-id: ${{ inputs.run_id }}
           github-token: ${{ github.token }}
       - name: Apply the saved plan (redacted)
+        env:
+          RUN_ID: ${{ inputs.run_id }}
         run: |
-          make ci-apply
-          echo "### $STACK applied from run ${{ inputs.run_id }} (library $(cat .ci/module_ref))" >> "$GITHUB_STEP_SUMMARY"
+          ref=$(cat .ci/module_ref)
+          [[ "$ref" =~ ^([0-9a-f]{40}|v[0-9]+\.[0-9]+\.[0-9]+)$ ]]
+          make "LIB_REF=$ref" ci-apply
+          echo "### $STACK applied from run $RUN_ID (library $(cat .ci/module_ref))" >> "$GITHUB_STEP_SUMMARY"

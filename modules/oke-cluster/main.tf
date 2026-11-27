@@ -113,13 +113,8 @@ resource "oci_containerengine_node_pool" "a1" {
     is_force_delete_after_grace_duration = true
   }
 
-  # Surge would temporarily add a node -> exceed the free allowance -> cost.
-  # Replace nodes one at a time instead.
-  node_pool_cycling_details {
-    is_node_cycling_enabled = true
-    maximum_surge           = "0"
-    maximum_unavailable     = "1"
-  }
+  # Basic OKE does not support automatic node cycling. Replace workers
+  # manually during upgrades, removing each old worker before adding its replacement.
 
   lifecycle {
     precondition {

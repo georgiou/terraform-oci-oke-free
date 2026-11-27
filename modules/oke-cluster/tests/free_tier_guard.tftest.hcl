@@ -47,8 +47,8 @@ run "defaults_fit_free_tier" {
   }
 
   assert {
-    condition     = oci_containerengine_node_pool.a1.node_pool_cycling_details[0].maximum_surge == "0"
-    error_message = "Surge nodes would exceed the free allowance."
+    condition     = length(oci_containerengine_node_pool.a1.node_pool_cycling_details) == 0
+    error_message = "Basic OKE must not configure Enhanced-only node cycling."
   }
 
   assert {

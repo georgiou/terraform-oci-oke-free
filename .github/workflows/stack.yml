@@ -5,7 +5,7 @@
 # the same driver every other CI uses. GitHub-specific parts only: artifacts
 # between jobs, the production environment gate, job summaries, drift issues.
 #
-# modes: plan   = pull requests (read-only identity, nothing uploaded)
+# modes: plan   = trusted ref (provider read identity, nothing uploaded)
 #        deploy = main: plan, upload the encrypted plan, auto-apply if allowed
 #        drift  = nightly: plan, open/close a "drift" issue (no details)
 name: stack
@@ -19,12 +19,12 @@ on:
       region: { type: string, required: true, description: "vars.OCI_REGION" }
       auto_apply: { type: string, default: "off", description: "off | safe" }
     secrets:
-      STATE_PASSPHRASE: { required: true }
-      STATE_S3_ACCESS_KEY_ID: { required: true }
-      STATE_S3_SECRET_ACCESS_KEY: { required: true }
-      OCI_PLAN_USER_OCID: { required: true }
-      OCI_PLAN_FINGERPRINT: { required: true }
-      OCI_PLAN_KEY_PEM: { required: true }
+      STATE_PASSPHRASE: { required: false }
+      STATE_S3_ACCESS_KEY_ID: { required: false }
+      STATE_S3_SECRET_ACCESS_KEY: { required: false }
+      OCI_PLAN_USER_OCID: { required: false }
+      OCI_PLAN_FINGERPRINT: { required: false }
+      OCI_PLAN_KEY_PEM: { required: false }
       TOFU_SETTINGS: { required: false, description: "Only if config/settings.tfvars is gitignored" }
       # The apply identity lives in the caller's "production" environment;
       # GitHub injects environment secrets into the job that declares it.
@@ -44,14 +44,19 @@ env:
   STACK: ${{ inputs.stack }}
   OCI_TENANCY_OCID: ${{ inputs.tenancy_ocid }}
   OCI_REGION: ${{ inputs.region }}
-  TF_VAR_state_passphrase: ${{ secrets.STATE_PASSPHRASE }}
-  AWS_ACCESS_KEY_ID: ${{ secrets.STATE_S3_ACCESS_KEY_ID }}
-  AWS_SECRET_ACCESS_KEY: ${{ secrets.STATE_S3_SECRET_ACCESS_KEY }}
-  TOFU_SETTINGS: ${{ secrets.TOFU_SETTINGS }}
 
 jobs:
   plan:
+    # Older callers may still invoke us from pull requests. Never run their
+    # checked-out code with state credentials, even for same-repo PRs.
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && github.event_name != 'pull_request_target'
     runs-on: ubuntu-latest
+    environment: oci-plan
+    env:
+      TF_VAR_state_passphrase: ${{ secrets.STATE_PASSPHRASE }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.STATE_S3_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.STATE_S3_SECRET_ACCESS_KEY }}
+      TOFU_SETTINGS: ${{ secrets.TOFU_SETTINGS }}
     outputs:
       changes: ${{ steps.plan.outputs.changes }}
       safe: ${{ steps.plan.outputs.safe }}
@@ -72,8 +77,16 @@ jobs:
           OCI_PLAN_USER_OCID: ${{ secrets.OCI_PLAN_USER_OCID }}
           OCI_PLAN_FINGERPRINT: ${{ secrets.OCI_PLAN_FINGERPRINT }}
           OCI_PLAN_KEY_PEM: ${{ secrets.OCI_PLAN_KEY_PEM }}
+          MODE: ${{ inputs.mode }}
         run: |
-          make ci-plan
+          if [ "$MODE" = drift ]; then
+            # Make reports both drift and errors as a nonzero exit. Only a
+            # completed drift result marker lets reporting proceed as success.
+            rm -f .ci/result.env .ci/summary.md
+            make ci-drift || { test -s .ci/summary.md && grep -qx 'CHANGES=true' .ci/result.env; }
+          else
+            make ci-plan
+          fi
           cat .ci/summary.md >> "$GITHUB_STEP_SUMMARY"
           grep -E '^(CHANGES|SAFE)=' .ci/result.env | tr '[:upper:]' '[:lower:]' >> "$GITHUB_OUTPUT"
       - if: inputs.mode == 'deploy' && steps.plan.outputs.changes == 'true'
@@ -93,6 +106,11 @@ jobs:
     if: inputs.mode == 'deploy' && needs.plan.outputs.changes == 'true' && needs.plan.outputs.safe == 'true' && inputs.auto_apply == 'safe'
     runs-on: ubuntu-latest
     environment: production
+    env:
+      TF_VAR_state_passphrase: ${{ secrets.STATE_PASSPHRASE }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.STATE_S3_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.STATE_S3_SECRET_ACCESS_KEY }}
+      TOFU_SETTINGS: ${{ secrets.TOFU_SETTINGS }}
     outputs:
       applied: ${{ steps.apply.outputs.applied }}
     steps:
@@ -116,7 +134,9 @@ jobs:
           OCI_APPLY_FINGERPRINT: ${{ secrets.OCI_APPLY_FINGERPRINT }}
           OCI_APPLY_KEY_PEM: ${{ secrets.OCI_APPLY_KEY_PEM }}
         run: |
-          make ci-apply-if-safe
+          ref=$(cat .ci/module_ref)
+          [[ "$ref" =~ ^([0-9a-f]{40}|v[0-9]+\.[0-9]+\.[0-9]+)$ ]]
+          make "LIB_REF=$ref" ci-apply-if-safe
           if grep -q '^APPLIED=true' .ci/result.env; then
             echo "applied=true" >> "$GITHUB_OUTPUT"
             echo "### $STACK: applied automatically (safe plan)" >> "$GITHUB_STEP_SUMMARY"

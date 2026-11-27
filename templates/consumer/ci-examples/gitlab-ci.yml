@@ -34,14 +34,14 @@ plan:
     paths: [.ci/tfplan, .ci/module_ref, .ci/result.env, .ci/summary.md]
     expire_in: 7 days
   rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE != "schedule"
 
 # Applies automatically only if AUTO_APPLY=safe and the plan is classified safe.
 apply-safe:
   stage: apply
   needs: [plan]
-  script: [make ci-apply-if-safe]
+  script:
+    - 'if [ -f .ci/tfplan ]; then make "LIB_REF=$(cat .ci/module_ref)" ci-apply-if-safe; else grep -qx "CHANGES=false" .ci/result.env; fi'
   environment: production
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE != "schedule" && $AUTO_APPLY == "safe"
@@ -50,7 +50,8 @@ apply-safe:
 apply:
   stage: apply
   needs: [plan]
-  script: [make ci-apply]
+  script:
+    - 'if [ -f .ci/tfplan ]; then make "LIB_REF=$(cat .ci/module_ref)" ci-apply; else grep -qx "CHANGES=false" .ci/result.env; fi'
   environment: production
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE != "schedule"

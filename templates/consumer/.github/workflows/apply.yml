@@ -19,14 +19,10 @@ concurrency:
 
 jobs:
   cluster:
+    if: vars.OCI_CI_ENABLED == 'true' && github.ref == 'refs/heads/main'
     uses: UPSTREAM_OWNER/UPSTREAM_REPO/.github/workflows/apply-plan.yml@UPSTREAM_REF
     with:
       run_id: ${{ inputs.run_id }}
       stack: cluster
       tenancy_ocid: ${{ vars.OCI_TENANCY_OCID }}
       region: ${{ vars.OCI_REGION }}
-    secrets:
-      STATE_PASSPHRASE: ${{ secrets.STATE_PASSPHRASE }}
-      STATE_S3_ACCESS_KEY_ID: ${{ secrets.STATE_S3_ACCESS_KEY_ID }}
-      STATE_S3_SECRET_ACCESS_KEY: ${{ secrets.STATE_S3_SECRET_ACCESS_KEY }}
-      TOFU_SETTINGS: ${{ secrets.TOFU_SETTINGS }}

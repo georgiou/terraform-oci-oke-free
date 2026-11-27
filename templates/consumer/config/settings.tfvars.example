@@ -32,7 +32,8 @@ cluster = {
   #   Tailscale (recommended): enable_tailscale = true (keep your IP in
   #   api_allowed_cidrs until the operator works: library examples/k8s/tailscale)
   #   or an allowlist:         api_allowed_cidrs = ["<your-ip>/32"]
-  enable_tailscale = true
+  enable_tailscale  = true
+  api_allowed_cidrs = [] # add your public IPv4 /32 until the Tailscale proxy works
 
   # Free-only tenancy: false. After a Pay As You Go upgrade you may set true.
   # private_workers = false

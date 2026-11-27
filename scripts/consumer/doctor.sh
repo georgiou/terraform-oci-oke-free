@@ -7,13 +7,39 @@ bad()  { red   "  FAIL  $*"; fail=1; }
 meh()  { warn  "  warn  $*"; }
 
 echo "Tools"
-if command -v tofu >/dev/null; then
-  want="$(cat "$ROOT/.opentofu-version")"; have="$(tofu version -json 2>/dev/null | sed -nE 's/.*"terraform_version": *"([^"]+)".*/\1/p')"
-  [ "$(printf '%s\n%s\n' "$want" "$have" | sort -V | head -n1)" = "$want" ] && ok "tofu $have" || bad "tofu $have < $want (.opentofu-version)"
-else bad "tofu not installed"; fi
+if ! command -v "${TOFU:-tofu}" >/dev/null; then
+  bad "tofu not installed"
+else
+  want=$(<"$ROOT/.opentofu-version")
+  if version_json=$("${TOFU:-tofu}" version -json); then
+    have=$(sed -nE 's/.*"terraform_version": *"([^"]+)".*/\1/p' <<<"$version_json")
+    if python3 - "$have" "$want" <<'PY'
+import re
+import sys
+
+def version(raw):
+    fields = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)(?:\+.*)?", raw)
+    return tuple(map(int, fields.groups())) if fields else ()
+
+sys.exit(not (version(sys.argv[2]) and version(sys.argv[1]) >= version(sys.argv[2])))
+PY
+    then ok "tofu $have"
+    else bad "need tofu $want or newer (found ${have:-unknown})"; fi
+  else bad "could not execute tofu version"; fi
+fi
 command -v oci >/dev/null && ok "oci CLI" || bad "oci CLI not installed"
 command -v gh  >/dev/null && ok "gh CLI (for make github-setup)" || meh "gh CLI not installed (only needed for make github-setup)"
-[ -L "$ROOT/stacks/cluster/_versions.tf" ] && ok "symlinks intact" || bad "stacks/*/_*.tf are not symlinks (on Windows: git config core.symlinks true, re-clone)"
+links_ok=true
+for stack in bootstrap cluster; do
+  for f in encryption locals providers variables versions; do
+    link="$ROOT/stacks/$stack/_$f.tf"
+    if [ ! -L "$link" ] || [ ! -f "$link" ] || [ "$(readlink "$link")" != "../../shared/$f.tf" ]; then
+      bad "broken or unexpected stack link: stacks/$stack/_$f.tf"
+      links_ok=false
+    fi
+  done
+done
+if [ "$links_ok" = true ]; then ok "symlinks intact"; fi
 
 echo "Config"
 if [ -f "$SETTINGS" ]; then
@@ -28,18 +54,22 @@ else bad "config/settings.tfvars missing (make configure)"; fi
 echo "Secrets in your shell"
 pp="${TF_VAR_state_passphrase:-}"; [ "${#pp}" -ge 16 ] && ok "TF_VAR_state_passphrase" || bad "export TF_VAR_state_passphrase (>= 16 chars, keep it in a password manager)"
 [ -n "${AWS_ACCESS_KEY_ID:-}" ] && [ -n "${AWS_SECRET_ACCESS_KEY:-}" ] && ok "state S3 credentials" \
-  || meh "AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY not set (needed after bootstrap; README -> Bootstrap)"
+  || meh "AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY not set (needed before planning with the state backend)"
 
 if [ -f "$SETTINGS" ] && command -v oci >/dev/null; then
   echo "OCI"
-  PROFILE="$(setting oci_profile)"; TENANCY="$(setting tenancy_ocid)"; REGION="$(setting region)"
-  if oci os ns get --profile "${PROFILE:-DEFAULT}" >/dev/null 2>&1; then ok "profile [$PROFILE] authenticates"
-  else bad "profile [$PROFILE] cannot call OCI (oci os ns get)"; fi
-  HOME_REGION="$(oci iam region-subscription list --profile "${PROFILE:-DEFAULT}" --tenancy-id "$TENANCY" \
+  PROFILE="$(setting oci_profile)"; PROFILE="${PROFILE:-DEFAULT}"
+  AUTH="$(oci_auth_mode "$PROFILE" "$(setting oci_auth)")"
+  TENANCY="$(setting tenancy_ocid)"; REGION="$(setting region)"; NAMESPACE="$(setting state_namespace)"
+  args=(--profile "$PROFILE" --auth "$AUTH" --region "$REGION")
+  if ns=$(oci os ns get "${args[@]}" --query data --raw-output 2>/dev/null) && [ -n "$ns" ] && [ "$ns" = "$NAMESPACE" ]; then
+    ok "profile [$PROFILE] authenticates to the configured namespace"
+  else bad "profile [$PROFILE] cannot access the configured namespace (oci os ns get)"; fi
+  HOME_REGION="$(oci iam region-subscription list "${args[@]}" --tenancy-id "$TENANCY" \
     --query 'data[?"is-home-region"]."region-name" | [0]' --raw-output 2>/dev/null || true)"
-  if [ -n "$HOME_REGION" ]; then
-    [ "$HOME_REGION" = "$REGION" ] && ok "region $REGION is the home region" || bad "region $REGION is not the home region ($HOME_REGION)"
-  fi
+  if [ -z "$HOME_REGION" ]; then bad "could not verify the tenancy home region"
+  elif [ "$HOME_REGION" = "$REGION" ]; then ok "region $REGION is the home region"
+  else bad "region $REGION is not the home region ($HOME_REGION)"; fi
 fi
 
 echo "Repo"

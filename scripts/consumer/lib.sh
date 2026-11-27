@@ -26,3 +26,17 @@ oci_config_value() { # profile key
     inside && $0 ~ "^[[:space:]]*"k"[[:space:]]*=" { sub(/^[^=]*=[[:space:]]*/, ""); print; exit }
   ' "${OCI_CLI_CONFIG_FILE:-$HOME/.oci/config}"
 }
+
+# Translate the OpenTofu setting once for all local OCI CLI operations.
+oci_auth_mode() { # profile [OpenTofu auth]
+  case "${2:-}" in
+    SecurityToken) echo security_token ;;
+    ApiKey) echo api_key ;;
+    InstancePrincipal) echo instance_principal ;;
+    '')
+      if [ -n "${OCI_CLI_AUTH:-}" ]; then printf '%s\n' "$OCI_CLI_AUTH"
+      elif [ -n "$(oci_config_value "$1" security_token_file 2>/dev/null || true)" ]; then echo security_token
+      else echo api_key; fi ;;
+    *) die "unsupported local OCI auth mode: $2" ;;
+  esac
+}

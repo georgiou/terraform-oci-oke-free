@@ -36,7 +36,9 @@ Alerts: budget (first penny), egress rate, nightly drift.  Access: Tailscale or 
 ```bash
 git clone https://github.com/<owner>/oci-oke-free.git
 oci-oke-free/scripts/new-consumer.sh my-oke            # newest release; or --ref main to track
-cd my-oke && git init -b main && make configure        # then follow my-oke/README.md
+cd my-oke && git init -b main
+make bootstrap-plan                                   # prompts and prepares a saved plan
+make bootstrap-apply                                  # after reviewing that plan
 ```
 
 The scaffold is an ordinary repo you own and commit. Its README covers
@@ -74,7 +76,7 @@ All CI logic is in **`scripts/consumer/ci.sh`** (`make ci-check|ci-plan|ci-apply
 - saved-plan apply
 - the safe/unsafe classification
 - drift exit codes
-- `EXPECT_CHANGES_SHA256`, an approval hash for CIs that re-plan in the apply run
+- saved-plan artifact approval; the change-list checksum is not approval for a re-plan
 
 It's driven by environment variables, so the GitHub reusable workflows are thin
 wrappers around it, and so are the GitLab, Forgejo, Woodpecker and cron examples
@@ -151,7 +153,11 @@ works in two layers:
   emptied. Private-only is the default: no LB subnet, and no NodePort exposure.
 - **No secrets in state:** the kubeconfig uses the `oci` exec plugin, and
   keys and OAuth secrets are created outside tofu.
-- **Zero-surge node cycling,** because a surge node would exceed the A1 allowance.
+- **Manual worker upgrades.** Basic clusters do not support automatic node cycling.
+  [Upgrade the control plane first](https://docs.oracle.com/iaas/Content/ContEng/Concepts/contengaboutupgradingclusters.htm).
+  Plan capacity and disruption before draining and replacing one worker at a time.
+  At the free quota, remove the old worker before provisioning its replacement;
+  replacement capacity is not guaranteed.
 
 ## Things to know
 
@@ -178,7 +184,7 @@ works in two layers:
 make test                # tofu test, all modules, mocked provider, no credentials
 make test-ci             # ci.sh end to end against a provider-free fixture: plan artifacts,
                          # safe/unsafe classification, saved-plan and stale-plan handling,
-                         # --if-safe, drift exit codes, approval hash, no values in output
+                         # --if-safe, drift, redaction and cleanup, guided setup, pinned tooling
 make validate-template   # scaffold a consumer against local modules, validate both roots,
                          # run a mocked plan with the example settings, check the Makefile bootstrap
 scripts/new-consumer.sh /tmp/dev --local   # consumer wired to this checkout (module_ref "")

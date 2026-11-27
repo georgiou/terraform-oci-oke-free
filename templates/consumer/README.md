@@ -25,36 +25,48 @@ like the modules. Run `make` to list them.
 
 ## Quick start
 
-You need an OCI account (free-only or Pay As You Go), the `oci` CLI with an
-API-key profile for an admin user (`oci setup config`), OpenTofu ≥ 1.13, `make`,
-and `gh` for CI. Linux and macOS work as is. On Windows, use WSL (the roots use symlinks).
+Install OpenTofu (see `.opentofu-version`), GNU Make, `oci`, `jq`, Git, and
+Python 3. Use Linux/macOS or WSL (the roots use symlinks). Sign in to your
+chosen tenancy with an OCI CLI profile that can bootstrap it. For an interactive
+session use `oci session authenticate --profile-name ROOT --region YOUR_HOME_REGION`.
 
-```bash
-make configure                 # tenancy, namespace and HOME region detected from your OCI profile
-$EDITOR config/settings.tfvars # access mode (Tailscale or allowlist), alert email
-git add -A && git commit -m "Initial configuration"
-
-export TF_VAR_state_passphrase='…'   # ≥ 16 chars, in your password manager. Losing it loses state.
-make doctor                    # preflight checks
-make seed                      # create the state bucket (once)
-
-# First run only: a Customer Secret Key on your own user (Profile -> Customer secret keys)
-export AWS_ACCESS_KEY_ID=… AWS_SECRET_ACCESS_KEY=…
-make plan-bootstrap            # review it, then:
-make apply-bootstrap
-
-make up                        # the cluster, about 10 minutes
-make kubeconfig && kubectl get nodes -o wide
-make lock && git add stacks/*/.terraform.lock.hcl && git commit -m "Lock providers"
-# tracking channel: `make lib-update` refreshes the library (and these targets)
+```sh
+make bootstrap-plan   # select profile, enter settings and credentials, seed and save a plan
+make bootstrap-apply  # confirm the exact saved plan, then set up the bucket-scoped key
 ```
 
-Then **replace the bootstrap credential with a least-privilege one.** Create a
-user, add it to the group in `tofu -chdir=stacks/bootstrap output state_access_group`,
-create a Customer Secret Key for **that** user, use it from now on, and delete the
-one on your admin user.
+Use a strong state passphrase from your password manager and keep the same one
+for both stacks. The wizard can issue a temporary admin Customer Secret Key if
+you don't already have one; when prompted, save it for the second command. Keys
+are issued outside state and never written to disk by the wizard. Use a private
+terminal if you opt to display a new key. Confirm the OCI alert subscription email.
 
-Confirm the subscription email OCI sends to each alert address, or no alerts arrive.
+If you're upgrading an existing checkout, run `make lib-update` after the new
+library revision is published. Do not use `make up` with the old library; it
+can apply without stopping for review.
+
+If you already applied bootstrap or stopped during the key handoff, run
+`make state-credentials` instead of reapplying. If the dedicated user already
+has a key, use the saved pair rather than minting another. Never revoke the admin
+key until you've saved and reloaded the dedicated pair and confirmed that a plan
+can lock state with it. If setup fails partway, keep the existing state and
+credentials; rerun the handoff, not bootstrap. OCI may take time to propagate IAM changes.
+
+For normal local operation, `make session` prompts for the saved passphrase and
+state key once and opens a shell. Inside that shell:
+
+```sh
+make plan-cluster   # also available as make up; make up never applies
+make apply-cluster  # after review
+make kubeconfig
+```
+
+For a new public API endpoint, set `cluster.api_allowed_cidrs` to your public
+IPv4 `/32` before the first plan. Remove it only after testing the Tailscale
+operator. Run `make lib-update` explicitly for tracking updates and `make lock`
+when updating provider locks or before enabling CI. Use the committed locks
+and don't run local and CI applies concurrently until locking has been verified
+for your OCI backend.
 
 ## CI setup
 
@@ -67,7 +79,12 @@ Confirm the subscription email OCI sends to each alert address, or no alerts arr
    openssl genrsa -out ci-plan.pem 2048 && openssl rsa -in ci-plan.pem -pubout -out ci-plan.pub
    # console: user -> API keys -> Add -> paste ci-plan.pub   (repeat for ci-apply)
    ```
-2. **Load GitHub:**
+2. **Load GitHub:** In repository settings, create the `oci-plan` and `production`
+   environments, restrict both to branch `main`, and protect `main`. Do not
+   store OCI/state credentials as repository-wide secrets. `make github-setup`
+   checks the environments, installs their secrets, and opts the repo into CI.
+   For a private upstream or SSH module URL, the runner also needs separate
+   module fetch access (a local SSH agent is not inherited).
    ```bash
    export CI_PLAN_USER_OCID=… CI_PLAN_KEY=ci-plan.pem CI_APPLY_USER_OCID=… CI_APPLY_KEY=ci-apply.pem
    export AUTO_APPLY=safe     # optional, see below
@@ -77,9 +94,9 @@ Confirm the subscription email OCI sends to each alert address, or no alerts arr
 
 | Event | What happens |
 |---|---|
-| Pull request | Plan with the read-only identity. The summary lists resource addresses, never values. |
+| Pull request | Formatting check only. No OCI or state credentials. |
 | Push to `main` | Plan and upload the encrypted plan. With `AUTO_APPLY=safe`, it's applied if it destroys nothing and leaves the cluster, node pool, IAM and quotas alone. |
-| Anything else | Waits for you: review with `make review-plan RUN=<id>`, apply with `gh workflow run apply.yml -f run_id=<id>` (or Actions -> apply). Starting it is the approval. |
+| Plan waiting for approval | Review with `make review-plan RUN=<id>`, apply with `gh workflow run apply.yml -f run_id=<id>` (or Actions -> apply). Starting it is the approval. |
 | Nightly | Drift check. Opens or closes a `drift` issue, with no details in it. |
 
 ## Without GitHub
@@ -103,16 +120,14 @@ uses the committed provider lockfiles without upgrading providers. If a lockfile
 needs updating, run `make lock` locally and commit the result.
 
 What each system needs to add:
-1. carry `.ci/` from the plan job to the apply job (artifacts), **or**
-   re-plan in the apply run and pass `EXPECT_CHANGES_SHA256` (the "changes
-   sha256" from the plan you reviewed). Apply then refuses anything that differs.
-2. an approval: a manual job or a manual pipeline.
-3. drift notification: a failed scheduled job (exit 2) is usually enough.
+1. Restrict credentials to trusted jobs on a protected branch, not PR code.
+2. Transfer `.ci/tfplan`, `module_ref`, and `result.env` from plan to apply and
+   apply only that artifact, with `LIB_REF` set to the saved library ref.
+   `CHANGES_SHA256` checks the address/action summary only. It cannot approve a re-plan.
+3. Require a manual approval and report drift (exit 2).
 
-Ready-made: `ci-examples/gitlab-ci.yml` (artifacts plus a manual apply job),
-`forgejo.yml` and `woodpecker.yml` (approval by hash), and `cron.sh` (a nightly
-drift check on any always-on box, with no CI at all). Renovate runs on GitLab,
-Forgejo/Gitea and Bitbucket too.
+`ci-examples/gitlab-ci.yml` transfers the saved artifact. The Forgejo and
+Woodpecker examples are plan/drift only. `cron.sh` runs drift checks without CI.
 
 **Fully manual** works as well: `make plan-cluster`, read it, then `make apply-cluster`.
 
@@ -142,9 +157,9 @@ Forgejo/Gitea and Bitbucket too.
 
 | Secret | Location |
 |---|---|
-| State passphrase | Password manager; repo secret `STATE_PASSPHRASE` |
-| State Customer Secret Key (bucket-only) | Shell; repo secrets `STATE_S3_*` |
-| CI plan key (read-only) | Repo secrets `OCI_PLAN_*` |
+| State passphrase | Password manager; `STATE_PASSPHRASE` in `oci-plan` and `production` |
+| State Customer Secret Key (bucket-scoped) | Password manager and session; `STATE_S3_*` in `oci-plan` and `production` |
+| CI plan key (provider read-only) | `oci-plan` environment secrets `OCI_PLAN_*` |
 | CI apply key (compartment-scoped) | `production` environment secrets `OCI_APPLY_*` |
 | Tailscale OAuth | In-cluster (SOPS / External Secrets), never GitHub |
 

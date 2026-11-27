@@ -12,7 +12,7 @@ locals {
   state_backend = {
     bucket                      = var.state_bucket
     region                      = var.region
-    endpoints                   = { s3 = "https://${var.state_namespace}.compat.objectstorage.${var.region}.oraclecloud.com" }
+    endpoints                   = { s3 = "https://${var.state_namespace}.compat.objectstorage.${var.region}.oci.customer-oci.com" }
     use_path_style              = true
     skip_region_validation      = true
     skip_credentials_validation = true

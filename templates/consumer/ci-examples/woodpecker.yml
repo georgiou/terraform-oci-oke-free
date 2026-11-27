@@ -1,14 +1,11 @@
 # Woodpecker CI. Copy to .woodpecker/tofu.yml.
 # Secrets (repo settings), all plain names: TF_VAR_state_passphrase, AWS_ACCESS_KEY_ID,
 #   AWS_SECRET_ACCESS_KEY, OCI_TENANCY_OCID, OCI_REGION, OCI_PLAN_USER_OCID,
-#   OCI_PLAN_FINGERPRINT, OCI_PLAN_KEY_PEM, OCI_APPLY_USER_OCID, OCI_APPLY_FINGERPRINT,
-#   OCI_APPLY_KEY_PEM. Restrict the OCI_APPLY_* secrets to the "manual" event.
+#   OCI_PLAN_FINGERPRINT, OCI_PLAN_KEY_PEM. Keep secrets restricted to trusted main jobs.
 # Drift: add a cron job named "drift" in the repo settings.
-# Apply: trigger a manual pipeline on main with the variable
-#   EXPECT_CHANGES_SHA256 = <"changes sha256" from the plan you reviewed>
-# It re-plans and applies only if the change list is identical.
+# This is plan/drift only unless you add exact saved-plan artifact transfer and approval.
 when:
-  - event: [pull_request, push, cron, manual]
+  - event: [push, cron, manual]
     branch: main
   - event: pull_request
 
@@ -37,23 +34,6 @@ steps:
       - sh ci-examples/install-tools.sh
       - if [ "$CI_PIPELINE_EVENT" = cron ]; then make ci-drift; else make ci-plan; fi
 
-  # Steps share the workspace, so .ci/tfplan from `plan` is applied as-is.
-  - name: apply
-    image: debian:stable-slim
-    environment:
-      TF_IN_AUTOMATION: "1"
-      TF_VAR_state_passphrase: { from_secret: TF_VAR_state_passphrase }
-      AWS_ACCESS_KEY_ID: { from_secret: AWS_ACCESS_KEY_ID }
-      AWS_SECRET_ACCESS_KEY: { from_secret: AWS_SECRET_ACCESS_KEY }
-      OCI_TENANCY_OCID: { from_secret: OCI_TENANCY_OCID }
-      OCI_REGION: { from_secret: OCI_REGION }
-      OCI_APPLY_USER_OCID: { from_secret: OCI_APPLY_USER_OCID }
-      OCI_APPLY_FINGERPRINT: { from_secret: OCI_APPLY_FINGERPRINT }
-      OCI_APPLY_KEY_PEM: { from_secret: OCI_APPLY_KEY_PEM }
-    commands:
-      - '[ -n "$EXPECT_CHANGES_SHA256" ] || { echo "set EXPECT_CHANGES_SHA256 on the manual pipeline"; exit 1; }'
-      - sh ci-examples/install-tools.sh
-      - make ci-apply
     when:
-      - event: manual
+      - event: [push, cron, manual]
         branch: main

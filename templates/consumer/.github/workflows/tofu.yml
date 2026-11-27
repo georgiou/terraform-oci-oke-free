@@ -19,21 +19,28 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  check:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - id: version
+        run: echo "tofu=$(cat .opentofu-version)" >> "$GITHUB_OUTPUT"
+      - uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: ${{ steps.version.outputs.tofu }}
+          tofu_wrapper: false
+      - run: tofu fmt -recursive -check -diff
   cluster:
-    # Pull requests from forks get no secrets: skip them.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    if: vars.OCI_CI_ENABLED == 'true' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     uses: UPSTREAM_OWNER/UPSTREAM_REPO/.github/workflows/stack.yml@UPSTREAM_REF
     with:
       stack: cluster
-      mode: ${{ github.event_name == 'schedule' && 'drift' || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && 'deploy' || 'plan') }}
+      mode: ${{ github.event_name == 'schedule' && 'drift' || 'deploy' }}
       tenancy_ocid: ${{ vars.OCI_TENANCY_OCID }}
       region: ${{ vars.OCI_REGION }}
       auto_apply: ${{ vars.AUTO_APPLY || 'off' }}
-    secrets:
-      STATE_PASSPHRASE: ${{ secrets.STATE_PASSPHRASE }}
-      STATE_S3_ACCESS_KEY_ID: ${{ secrets.STATE_S3_ACCESS_KEY_ID }}
-      STATE_S3_SECRET_ACCESS_KEY: ${{ secrets.STATE_S3_SECRET_ACCESS_KEY }}
-      OCI_PLAN_USER_OCID: ${{ secrets.OCI_PLAN_USER_OCID }}
-      OCI_PLAN_FINGERPRINT: ${{ secrets.OCI_PLAN_FINGERPRINT }}
-      OCI_PLAN_KEY_PEM: ${{ secrets.OCI_PLAN_KEY_PEM }}
-      TOFU_SETTINGS: ${{ secrets.TOFU_SETTINGS }}

@@ -15,7 +15,7 @@ output "state_namespace" {
 
 output "state_s3_endpoint" {
   description = "S3-compatible endpoint used by the state backend."
-  value       = "https://${var.state_namespace}.compat.objectstorage.${var.region}.oraclecloud.com"
+  value       = "https://${var.state_namespace}.compat.objectstorage.${var.region}.oci.customer-oci.com"
 }
 
 output "ci_groups" {

@@ -84,7 +84,7 @@ Then report what was verified and what wasn't (nothing here runs against a real 
 
 ## Invariants
 
-1. **Always Free only.** Clusters stay `BASIC_CLUSTER`, `maximum_surge` stays `"0"`,
+1. **Always Free only.** Clusters stay `BASIC_CLUSTER`, node cycling stays disabled,
    and limits come only from `free_tier_limits`. No paid shapes and no Enhanced-only features.
 2. **Private by default.** Defaults: no public ingress, no LB subnet, and no
    inbound internet except optional Tailscale UDP 41641.
@@ -95,10 +95,9 @@ Then report what was verified and what wasn't (nothing here runs against a real 
 4. **One CI implementation.** Logic goes in `scripts/consumer/ci.sh`. GitHub
    workflows and the `ci-examples` only wire up secrets, artifacts, approvals
    and notifications. Never duplicate plan/apply logic in YAML.
-5. **Saved plans only.** `apply` steps apply the uploaded plan file. The only
-   exception is CIs that can't carry it: they re-plan in the apply run, and
-   `EXPECT_CHANGES_SHA256` must gate the apply. Never an unconditional re-plan and apply.
-   The tracking channel is resolved to a SHA once, in the plan job, and reused by apply.
+5. **Saved plans only.** `apply` steps apply the uploaded plan file. CI that
+   cannot transfer the exact artifact must not offer apply. A summary checksum
+   is not an approval. Tracking plans pin the downloaded library's SHA, reused by apply.
 6. **Never auto-apply** destroys, or changes to clusters, node pools, IAM or quotas.
 7. **Tofu stops at the cluster boundary.** No kubernetes or helm providers.
 8. **No third-party OCI modules** (evaluated: they can't express the free-only
